@@ -9,6 +9,11 @@
 #include <WiFiMulti.h>
 #include <HTTPClient.h>
 
+//Fall constants
+constexpr float FALL_THRESHOLD = 13.0f;
+constexpr float FALL_SQUARED = FALL_THRESHOLD * FALL_THRESHOLD;
+
+//Sensors
 Adafruit_BME280 bme;
 Adafruit_APDS9960 apds;
 Adafruit_SGP30 sgp;
@@ -17,15 +22,23 @@ Adafruit_MPU6050_Accelerometer acc(&mpu);
 sensors_event_t event; 
 WiFiMulti wifi;
 
+//Communcation details
 const char* ssid = "postnet";
 const char* password = "postNetPassword";
-String url = "http://192.168.137.247/";
+String url = "http://192.168.137.247/datafwd.php/";
+String UID = "kyle";
+
+//Talk button GPIO pin
+int buttonInput = 12;
 
 void setup() 
 {
+  //Set up the baud rate
   Serial.begin(115200);
 
   delay(5000);
+
+  pinMode(buttonInput, INPUT);
 
   //initialize sensors
   bme.begin();
@@ -48,32 +61,23 @@ void loop()
     Serial.println("Connected!");
 
     //collect sensor data  
+    int buttonPress = digitalRead(buttonInput);
 
-    //weather data
+    //Temperature data
     float temp = bme.readTemperature()*9.0F / 5.0F + 32; // in F
-    float pressure = bme.readPressure() * 0.0009869233 * 1000 / 100.0F; //in milliatmosphere
-    float hum = bme.readHumidity(); //in percent
+
+    //Error checking
     if(!acc.getEvent(&event))
     {
       Serial.println("Could not get accelerometer data.");
-    } //in ??
-
-    //light level data
-    uint16_t r, g ,b, c;
-    apds.getColorData(&r, &g, &b, &c);
-    while(!apds.colorDataReady())
-    {
-      delay(5);
     }
-    uint16_t lux = apds.calculateLux(r, g, b) * 100;
-
     
     if(!sgp.IAQmeasure())
     {
-      Serial.println("Measurement failed");
+      Serial.println("Air Quality Measurement failed");
     }
 
-    //air quality data
+    //Air quality data
     uint16_t voc = sgp.TVOC;
     uint16_t co2 = sgp.eCO2;
 
@@ -81,13 +85,16 @@ void loop()
     float ax = event.acceleration.x;
     float ay = event.acceleration.y;
     float az = event.acceleration.z;
+    //Check to see if a fall has occurred
+    int fall = (ax * ax + ay * ay + az * az) > FALL_SQUARED;
 
-    //http send
+    //Prepare the paylaod with all relevant data
     HTTPClient http;
-    String payload = url + "&temp=" + String(temp) + "&humidity=" + 
-      String(lux) + "&voc=" + String(voc) + "&co2=" + String(co2) +
-      "&ax=" + String(ax) + "&ay=" + String(ay) + "&az=" + String(az);
+    String payload = url + "?temp=" + String(temp) + "&voc=" + String(voc) + 
+      "&co2=" + String(co2) + "&fall=" + String(fall) + 
+      "&talk=" + String(buttonPress) + "&hr=80" + "&uid=" + String(UID);
     
+    //Send the payload
     http.begin(payload);
     int response = http.GET();
 
@@ -95,6 +102,6 @@ void loop()
     Serial.println(response);
   }
   
-  delay(500);
+  delay(300);
   
 }
